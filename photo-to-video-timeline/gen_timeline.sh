@@ -49,7 +49,7 @@ human_size() {
 to_hhmmss() {
   local t="$1"
   t="${t//:/}"
-  printf "%06d" "${t}"
+  printf "%06d" "$t"
 }
 
 strip_all_extensions() {
@@ -88,15 +88,8 @@ echo "FPS                 : ${FPS}"
 echo "Start time          : ${START_TIME}"
 echo "Output file         : ${OUTPUT_FILE}"
 
-if [[ ! -d "${START_DIR}" ]]; then
-  echo "Ошибка: папка не найдена: ${START_DIR}" >&2
-  exit 1
-fi
-
-if [[ ! -d "${NEXT_DIR}" ]]; then
-  echo "Ошибка: папка следующего дня не найдена: ${NEXT_DIR}" >&2
-  exit 1
-fi
+[[ -d "${START_DIR}" ]] || { echo "Ошибка: папка не найдена: ${START_DIR}" >&2; exit 1; }
+[[ -d "${NEXT_DIR}" ]] || { echo "Ошибка: папка следующего дня не найдена: ${NEXT_DIR}" >&2; exit 1; }
 
 START_HHMMSS="$(to_hhmmss "${START_TIME}")"
 
@@ -132,8 +125,7 @@ add_files_from_dir() {
         ;;
     esac
 
-    printf '%s\n' "$f" >> "$TMP_SELECTED"
-
+    printf '%s\n' "$f" >> "${TMP_SELECTED}"
     size="$(stat -c '%s' "$f")"
     selected_bytes=$((selected_bytes + size))
     selected_count=$((selected_count + 1))
@@ -143,10 +135,7 @@ add_files_from_dir() {
 add_files_from_dir "${START_DIR}" "ge_start"
 add_files_from_dir "${NEXT_DIR}" "lt_start"
 
-if [[ ! -s "${TMP_SELECTED}" ]]; then
-  echo "Ошибка: не найдено файлов для обработки" >&2
-  exit 1
-fi
+[[ -s "${TMP_SELECTED}" ]] || { echo "Ошибка: не найдено файлов для обработки" >&2; exit 1; }
 
 sort "${TMP_SELECTED}" > "${LIST_FILE}"
 
