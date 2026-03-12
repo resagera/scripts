@@ -2186,4 +2186,123 @@ bash ./gen_timeline.sh 2026-03-11 10 06:00:00
 
 ----------
 
+Перенеси всю логику на golang приложение + (если так будет быстрее), перенеси  нанесение текста на фото так же на библиотеку внутри golang приложения, вместо ffmpeg. Пусть только видео теперь генерирует ffmpeg, остальным занимается приложение
+
+----------
+
+
+Готово — вынес логику в Go-файл рядом в canvas: `photo_timeline_generator.go`.
+
+Что делает приложение:
+
+* выбирает файлы из папки стартовой даты от заданного времени
+* добирает файлы из следующей даты до этого же времени
+* рисует текст на кадры **внутри Go**, без `ffmpeg drawtext`
+* складывает временные jpg в `./cache`
+* считает размер исходных и временных файлов
+* вызывает `ffmpeg` только на финальной сборке mp4
+* пишет лог
+
+Что нужно для сборки:
+
+```bash
+go mod init photo-timeline
+go get golang.org/x/image/font golang.org/x/image/font/opentype golang.org/x/image/math/fixed
+go build -o photo-timeline photo_timeline_generator.go
+```
+
+Запуск:
+
+```bash
+./photo-timeline -date 2026-03-11 -fps 10 -start-time 06:00:00
+```
+
+Полезные флаги:
+
+```bash
+-base-dir /home/resager/rudb/mount/2tb-ext-part/rudb/dev/android/api/storage/photo
+-cache-dir ./cache
+-historic-dir ./historic
+-font /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+-workers 8
+-jpeg-quality 92
+-keep-cache=true
+-ffmpeg ffmpeg
+```
+
+Пример:
+
+```bash
+./photo-timeline \
+  -date 2026-03-11 \
+  -fps 10 \
+  -start-time 06:00:00 \
+  -workers 8 \
+  -keep-cache=true
+```
+
+Пара замечаний:
+
+* Сейчас приложение требует, чтобы папка следующего дня существовала.
+* Подпись рисуется как белый текст на полупрозрачном черном прямоугольнике снизу по центру.
+* Если системный шрифт не найдется, используется встроенный Go-шрифт.
+
+Я бы еще сразу поправил две вещи в следующей итерации:
+
+1. ограничение длины подписи, если имя файла очень длинное;
+2. сохранение прогресса не на каждый кадр, а, например, раз в 100 кадров — так лог будет легче.
+
+
+----------
+
+ошибка
+
+
+2026/03/12 21:36:53 [68/28484] 000066_front_cam20260308_060317.jpg.jpg
+2026/03/12 21:36:53 [69/28484] 000069_front_cam20260308_060326.jpg.jpg
+panic: runtime error: index out of range [201] with length 42
+
+goroutine 20 [running]:
+image/draw.drawGlyphOver(0xc0001f2100, {{0xc0001f2100?, 0xc000231b68?}, {0x5aea10?, 0xc00018e020?}}, 0xc000231b28?, 0xc000119bb0, {0xc000119bb0?, 0xc000231b48?})
+/home/resager/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.7.linux-amd64/src/image/draw/draw.go:624 +0x267
+image/draw.DrawMask({0x5aed40, 0xc0001f2100}, {{0x204, 0x392}, {0x211, 0x3a4}}, {0x5aea10, 0xc00018e020}, {0x0, 0x0}, ...)
+/home/resager/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.7.linux-amd64/src/image/draw/draw.go:166 +0x2af
+golang.org/x/image/font.(*Drawer).DrawString(0xc000231d80, {0xc000367e20, 0x18})
+/home/resager/go/pkg/mod/golang.org/x/image@v0.37.0/font/font.go:180 +0x16b
+main.renderSingleFrame({0xc000442c80, 0x74}, {0xc0006b84d0, 0xa6}, {0xc000367e20, 0x18}, {0x5af308, 0xc000119508}, 0x5c)
+/home/resager/rudb/mount/2tb-ext-part/rudb/dev/scripts/scripts/photo-to-video-timeline/photo_timeline_generator.go:408 +0x609
+main.renderFrames.func1()
+/home/resager/rudb/mount/2tb-ext-part/rudb/dev/scripts/scripts/photo-to-video-timeline/photo_timeline_generator.go:325 +0x2f4
+created by main.renderFrames in goroutine 1
+/home/resager/rudb/mount/2tb-ext-part/rudb/dev/scripts/scripts/photo-to-video-timeline/photo_timeline_generator.go:321 +0x170
+
+----------
+
+
+Да, причина почти наверняка в том, что один и тот же `font.Face` использовался одновременно из нескольких goroutine. Это не потокобезопасно, и отсюда panic внутри `image/draw`.
+
+Я уже поправил код:
+
+* теперь **каждый worker создает свой собственный `font.Face`**
+* общий `font.Face` между goroutine больше не шарится
+* это должно убрать `index out of range` в `drawGlyphOver`
+
+Что сделать у себя:
+
+```bash
+go build -o photo-timeline photo_timeline_generator.go
+./photo-timeline -date 2026-03-11 -fps 10 -start-time 06:00:00 -workers 8 -keep-cache=true
+```
+
+Если хочешь максимально безопасно проверить, сначала запусти вообще в один worker:
+
+```bash
+./photo-timeline -date 2026-03-11 -fps 10 -start-time 06:00:00 -workers 1 -keep-cache=true
+```
+
+Если с `-workers 1` все пройдет, а с `-workers 8` тоже теперь будет ок — значит фикс сработал как надо.
+
+Еще один практичный момент: у тебя кадров очень много, так что лог на каждый кадр может быть тяжеловат. Следующим шагом я бы еще упростил логирование, чтобы писать прогресс раз в 100 или 500 кадров.
+
+----------
 

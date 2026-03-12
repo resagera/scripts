@@ -14,7 +14,7 @@ START_TIME="${3:-06:00:00}"
 
 # 1 = оставлять cache даже при успехе
 # 0 = удалять cache при успехе
-KEEP_CACHE_ON_SUCCESS=1
+KEEP_CACHE_ON_SUCCESS=0
 
 NEXT_DATE="$(date -d "${START_DATE} +1 day" +%F)"
 
@@ -214,9 +214,9 @@ for file in "${SELECTED_FILES[@]}"; do
 
   out_file="${TMP_IMG_DIR}/$(printf '%06d' "$idx")_${base}"
 
-  echo "[$idx/$selected_count]"
-  echo "  input : $file"
-  echo "  output: $out_file"
+#echo "[$idx/$selected_count]"
+#  echo "  input : $file"
+#  echo "  output: $out_file"
 
   ffmpeg -y -loglevel error \
     -i "$file" \
